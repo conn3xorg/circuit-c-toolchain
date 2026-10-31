@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Conn3x
+        env: &gh
+          GH_TOKEN: ${{ github.token }}
+        run: &install |
+          tag=$(gh release view -R conn3xorg/conn3x --json tagName -q .tagName)
+          file="conn3x_${tag#v}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "https://github.com/conn3xorg/conn3x/releases/download/$tag/$file"
+          curl -sSfLO "https://github.com/conn3xorg/conn3x/releases/download/$tag/checksums.txt"
+          grep " $file\$" checksums.txt | sha256sum -c -
+          mkdir -p bin && tar -xzf "$file" -C bin conn3x
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: conn3x version
+      - run: conn3x fmt -check -recursive
+      - name: Validate
+        run: conn3x init -backend=false && conn3x validate
+      - name: Validate the example
+        working-directory: examples/local
+        run: conn3x init -backend=false && conn3x validate
+
+  e2e:
+    needs: validate
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [rocky10, fedora45, ubuntu2404, debian13]
+    name: e2e (${{ matrix.distro }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The test host images live in the Conn3x repo.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: conn3xorg/conn3x
+          ref: main
+          path: conn3x
+          persist-credentials: false
+          sparse-checkout: test/images
+      - name: Install Conn3x
+        env: *gh
+        run: *install
+      - name: Start the ${{ matrix.distro }} host
+        working-directory: examples/local
+        env:
+          CONTAINERFILE: ${{ github.workspace }}/conn3x/test/images/${{ matrix.distro }}/Containerfile
+          PODMAN: sudo podman
+        run: ./up.sh
+      - name: Apply, then plan again with no changes
+        working-directory: examples/local
+        run: |
+          conn3x init
+          conn3x apply -auto-approve
+          conn3x plan -detailed-exitcode
+      - name: Compile C, C++ and assembly
+        run: |
+          sudo podman exec circuit-c-toolchain bash -lc '
+            set -eux
+            gcc --version; g++ --version; make --version; gdb --version; nasm --version
+            cd "$(mktemp -d)"
+            cat > hello.c <<EOF
+            #include <stdio.h>
+            int main(void) { printf("sum %d\\n", 1 + 2 + 3); return 0; }
+            EOF
+            cat > hello.cpp <<EOF
+            #include <iostream>
+            #include <numeric>
+            #include <vector>
+            int main() { std::vector<int> v{1, 2, 3}; std::cout << "sum " << std::accumulate(v.begin(), v.end(), 0) << std::endl; }
+            EOF
+            printf "c: hello.c\\n\\tgcc -g -o c hello.c\\ncxx: hello.cpp\\n\\tg++ -o cxx hello.cpp\\n" > Makefile
+            make c cxx
+            ./c | grep -x "sum 6"
+            ./cxx | grep -x "sum 6"
+            gdb -batch -ex "break main" -ex run -ex "info breakpoints" ./c | grep -F "breakpoint already hit 1 time"
+            # Returns 42 from _start, in the assembly each architecture runs.
+            case "$(uname -m)" in
+            x86_64)
+              printf "global _start\\nsection .text\\n_start:\\n  mov eax, 60\\n  mov edi, 42\\n  syscall\\n" > a.asm
+              nasm -f elf64 -o a.o a.asm
+              ;;
+            aarch64)
+              printf ".global _start\\n.text\\n_start:\\n  mov x8, #93\\n  mov x0, #42\\n  svc #0\\n" > a.s
+              gcc -c -o a.o a.s
+              ;;
+            esac
+            ld -o a a.o
+            rc=0; ./a || rc=$?
+            [ "$rc" = 42 ]
+          '
+      - name: Clean up
+        if: always()
+        working-directory: examples/local
+        env:
+          PODMAN: sudo podman
+        run: ./down.sh
