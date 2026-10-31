@@ -77,16 +77,8 @@ jobs:
             set -eux
             gcc --version; g++ --version; make --version; gdb --version; nasm --version
             cd "$(mktemp -d)"
-            cat > hello.c <<EOF
-            #include <stdio.h>
-            int main(void) { printf("sum %d\\n", 1 + 2 + 3); return 0; }
-            EOF
-            cat > hello.cpp <<EOF
-            #include <iostream>
-            #include <numeric>
-            #include <vector>
-            int main() { std::vector<int> v{1, 2, 3}; std::cout << "sum " << std::accumulate(v.begin(), v.end(), 0) << std::endl; }
-            EOF
+            printf "%s\\n" "#include <stdio.h>" "int main(void) { printf(\"sum %d\\\\n\", 1 + 2 + 3); return 0; }" > hello.c
+            printf "%s\\n" "#include <iostream>" "#include <numeric>" "#include <vector>" "int main() { std::vector<int> v{1, 2, 3}; std::cout << \"sum \" << std::accumulate(v.begin(), v.end(), 0) << std::endl; }" > hello.cpp
             printf "c: hello.c\\n\\tgcc -g -o c hello.c\\ncxx: hello.cpp\\n\\tg++ -o cxx hello.cpp\\n" > Makefile
             make c cxx
             ./c | grep -x "sum 6"
