@@ -23,7 +23,7 @@ NASM assembles x86 only. It installs on arm64 too and produces x86 objects there
 
 ```hcl
 module "c_toolchain" {
-  source = "github.com/conn3xorg/circuit-c-toolchain?ref=v0.1.0"
+  source = "github.com/conn3xorg/circuit-c-toolchain?ref=v0.1.1"
 
   hosts                = { app1 = "203.0.113.10", app2 = "203.0.113.11" }
   ssh_private_key_file = "~/.ssh/id_ed25519"
