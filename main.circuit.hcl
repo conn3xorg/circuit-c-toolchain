@@ -14,7 +14,7 @@ data "conn3x_host" "facts" {
 }
 
 locals {
-  nasm_in_crb = { for name in keys(var.hosts) : name => contains(["rocky", "almalinux", "centos"], data.conn3x_host.facts[name].os_id) }
+  nasm_in_crb = { for name in keys(var.hosts) : name => contains(["rocky", "almalinux"], data.conn3x_host.facts[name].os_id) }
 }
 
 circuit "c_toolchain" {
@@ -35,8 +35,7 @@ circuit "c_toolchain" {
     }
   }
 
-  # Rocky Linux, AlmaLinux and CentOS Stream keep nasm in CRB, which is off by
-  # default. These two steps take it from there for that one install, leaving
+  # Rocky Linux and AlmaLinux keep nasm in CRB, which is off by default. These two steps take it from there for that one install, leaving
   # the repository off, and from the usual place everywhere else.
   step "nasm" {
     package {
